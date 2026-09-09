@@ -1,7 +1,8 @@
 # ios-charging-monitor
 
 ChargeSpeed: live charging power on an iPhone, read from the phone's PMU and charger sensors via
-private APIs. Build it yourself, install on your own phone. Cannot ship on the App Store.
+private APIs. Build it yourself, install on your own phone. Cannot ship on the App Store because of the private
+APIs it uses (see below).
 
 <img src="docs/screenshot.png" width="360" alt="ChargeSpeed showing 20.39 W from a USB-C charger, 18.33 W into the battery, 14.31 V at 1.43 A, 50% charged, adapter negotiated 15 V × 3 A, battery and charger temperatures">
 
