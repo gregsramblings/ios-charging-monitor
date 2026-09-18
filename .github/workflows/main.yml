@@ -1,0 +1,58 @@
+name: Release IPA
+
+# Builds an unsigned IPA on every v* tag and attaches it to a GitHub release.
+# Unsigned on purpose: sideloading tools re-sign it with the user's own Apple ID,
+# and an unsigned bundle carries no team, certificate, or device list.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate project
+        run: xcodegen generate
+
+      - name: Build unsigned Release
+        run: |
+          xcodebuild \
+            -project ChargeSpeed.xcodeproj \
+            -scheme ChargeSpeed \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY= \
+            DEVELOPMENT_TEAM= \
+            build
+
+      - name: Package IPA
+        run: |
+          APP=build/DerivedData/Build/Products/Release-iphoneos/ChargeSpeed.app
+          test ! -e "$APP/embedded.mobileprovision"
+          test ! -e "$APP/_CodeSignature"
+          mkdir -p build/ipa/Payload
+          cp -R "$APP" build/ipa/Payload/
+          cd build/ipa && zip -qr "../ChargeSpeed-${GITHUB_REF_NAME}.ipa" Payload
+          ls -la ../ChargeSpeed-*.ipa
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" build/ChargeSpeed-*.ipa \
+            --title "$GITHUB_REF_NAME" \
+            --notes "Unsigned IPA. Sign it with your own Apple ID using a sideloading tool (AltStore, Sideloadly, or similar). See the README."
