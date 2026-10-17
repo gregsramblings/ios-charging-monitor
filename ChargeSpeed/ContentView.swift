@@ -257,6 +257,7 @@ struct ContentView: View {
                     color: throttling ? .red : (monitor.thermalState == .fair ? .orange : nil))
                 row("Battery", snap.batteryTemperatureC.map { Formatting.temperature($0) },
                     color: snap.batteryTemperatureC.map { $0 >= Self.batteryHotC ? .red : ($0 >= Self.batteryWarmC ? .orange : nil) } ?? nil)
+                row("Battery gauge board", snap.batteryHotspotC.map { Formatting.temperature($0) })
                 row("Charger junction", snap.chargerJunctionTemperatureC.map { Formatting.temperature($0) },
                     color: throttling ? .red : nil)
                 row("SoC (hottest die)", snap.socMaxTemperatureC.map { Formatting.temperature($0) },

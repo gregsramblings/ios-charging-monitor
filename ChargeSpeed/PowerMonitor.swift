@@ -69,9 +69,18 @@ final class PowerMonitor: ObservableObject {
         let window: TimeInterval
     }
 
-    /// Usable battery energy used to convert %/h into watts.
-    /// iPhone 17 Pro Max: 5088 mAh × ~3.87 V nominal ≈ 19.7 Wh. Adjust for other models.
-    let batteryWattHours: Double = 19.7
+    /// Usable battery energy used to convert %/h into watts, by model identifier.
+    /// iPhone 17 Pro Max: 19.77 Wh (5088 mAh). iPhone 18 Pro Max: 21.75 Wh (5567 mAh, iFixit).
+    let batteryWattHours: Double = {
+        var size = 0
+        sysctlbyname("hw.machine", nil, &size, nil, 0)
+        var buffer = [CChar](repeating: 0, count: max(size, 1))
+        sysctlbyname("hw.machine", &buffer, &size, nil, 0)
+        switch String(cString: buffer) {
+        case "iPhone19,3", "iPhone19,7": return 21.75
+        default: return 19.7
+        }
+    }()
 
     private let reader = IOKitBattery()
     private let sensors = HIDSensors()

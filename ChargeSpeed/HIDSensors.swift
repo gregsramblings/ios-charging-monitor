@@ -104,7 +104,8 @@ final class HIDSensors {
         services.enumerated().compactMap { index, service in
             guard let event = copyEvent(service.ref, service.eventType, 0, 0)?.takeRetainedValue() else { return nil }
             let value = getFloat(event, Int32(service.eventType << 16))
-            guard value.isFinite else { return nil }
+            // iOS 27 publishes PMU rail keys that read as 15,000 A or 16,000 V; nothing real is that large.
+            guard value.isFinite, abs(value) < 1000 else { return nil }
             return Reading(id: index, name: service.name, usage: service.usage, value: value)
         }
     }

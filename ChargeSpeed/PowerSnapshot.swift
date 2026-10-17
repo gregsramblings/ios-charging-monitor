@@ -124,9 +124,25 @@ struct PowerSnapshot {
         guard let i = sensorBatteryCurrent, let v = sensorBatteryVoltage else { return nil }
         return i * v
     }
-    /// Hottest of the battery gas-gauge sensors (there are several; one runs warmer).
+    private var gasGaugeTemperatures: [Double] {
+        sensors.filter { $0.usage == 5 && $0.name == "gas gauge battery" }.map(\.value).sorted()
+    }
+
+    /// The gas gauge publishes four temperature keys (TG0B, TG0C, TG0H, TG0V). Three agree and
+    /// track the cell; TG0B runs up to ~10 °C hotter under charge current, most likely the gauge
+    /// board near the connector. The median keeps the odd one out from posing as the cell.
     var sensorBatteryTemperatureC: Double? {
-        sensors.filter { $0.usage == 5 && $0.name == "gas gauge battery" }.map(\.value).max()
+        let values = gasGaugeTemperatures
+        guard !values.isEmpty else { return nil }
+        let mid = values.count / 2
+        return values.count.isMultiple(of: 2) ? (values[mid - 1] + values[mid]) / 2 : values[mid]
+    }
+
+    /// The hottest gas-gauge key when it stands clear of the others.
+    var batteryHotspotC: Double? {
+        guard let median = sensorBatteryTemperatureC, let hottest = gasGaugeTemperatures.last,
+              hottest > median + 1.5 else { return nil }
+        return hottest
     }
     var chargerJunctionTemperatureC: Double? { sensor("Charger TQ0j") }
     var chargerDieTemperatureC: Double? { sensor("Charger TQ0d") }
