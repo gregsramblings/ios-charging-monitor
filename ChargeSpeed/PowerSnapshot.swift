@@ -42,18 +42,27 @@ struct PowerSnapshot {
     }
     var holdIsInferred: Bool { chargeStatusText == nil && isChargingOnHold }
 
-    /// iPhone 18 Pro / Pro Max (iPhone19,x) charge through two wired paths above ~30 W; only the
-    /// first has sensors.
-    static let hasUnmeteredChargePath: Bool = {
+    /// Model identifier, e.g. "iPhone19,3".
+    static let modelIdentifier: String = {
         var size = 0
         sysctlbyname("hw.machine", nil, &size, nil, 0)
         var buffer = [CChar](repeating: 0, count: max(size, 1))
         sysctlbyname("hw.machine", &buffer, &size, nil, 0)
-        return String(cString: buffer).hasPrefix("iPhone19,")
+        return String(cString: buffer)
     }()
 
-    /// Negotiated PD contract current in amps.
-    var contractCurrentA: Double? { adapterNegotiated.map { Double($0.current_mA) / 1000 } }
+    /// iPhone 18 Pro generation (iPhone19,x). On the 18 Pro Max, wired input above about 30 W
+    /// reads about half of what a USB-C meter shows (measured here and by two MiniWatts users).
+    static let readsHalfAboveThirtyWatts = modelIdentifier.hasPrefix("iPhone19,")
+
+    /// True when the half reading can apply: an 18 Pro generation phone on a wired adapter whose
+    /// negotiated profile can supply more than 30 W. The app cannot tell from its sensors when the
+    /// phone is in that mode, so this is a caution, not a detection.
+    var mayReadHalf: Bool {
+        guard Self.readsHalfAboveThirtyWatts, externalConnected, !isWirelessInput, !adapterIsWireless,
+              let contract = adapterNegotiated else { return false }
+        return contract.voltage_mV * contract.current_mA > 30_000_000
+    }
 
     // MARK: Charge state
 
@@ -121,46 +130,69 @@ struct PowerSnapshot {
 
     // MARK: Sensor-derived values (iOS)
 
-    func sensor(_ name: String) -> Double? { sensors.first { $0.name == name }?.value }
+    /// Value of one SMC key. iOS 27 publishes each key through two services that read it a few
+    /// milliseconds apart, so the copies are averaged, never summed. Falls back to the product
+    /// name when a service has no LocationID.
+    func sensor(key: String, name: String) -> Double? {
+        var matches = sensors.filter { $0.key == key }
+        if matches.isEmpty { matches = sensors.filter { $0.key.isEmpty && $0.name == name } }
+        guard !matches.isEmpty else { return nil }
+        return matches.map(\.value).reduce(0, +) / Double(matches.count)
+    }
 
-    var usbInputVoltage: Double? { sensor("Charger VQ0u") }
-    var usbInputCurrent: Double? { sensor("Charger IQ0u") }
-    var wirelessInputVoltage: Double? { sensor("Charger VQ1u") }
+    var usbInputVoltage: Double? { sensor(key: "VQ0u", name: "Charger VQ0u") }
+    var usbInputCurrent: Double? { sensor(key: "IQ0u", name: "Charger IQ0u") }
+    var wirelessInputVoltage: Double? { sensor(key: "VQ1u", name: "Charger VQ1u") }
     var isWirelessInput: Bool { (wirelessInputVoltage ?? 0) > 1 && (usbInputVoltage ?? 0) < 1 }
     /// iOS describes MagSafe pucks as "magsafe chg" and plain Qi pads as "baseline arcas".
     var isMagSafe: Bool { (adapterDescription ?? adapterName ?? "").lowercased().contains("magsafe") }
     var wirelessKind: String { isMagSafe ? "MagSafe" : "wireless" }
 
-    var sensorBatteryCurrent: Double? { sensor("Charger IQ0B") }
-    var sensorBatteryVoltage: Double? { sensor("Charger VQ0l") ?? sensor("PMU VP0u") }
+    /// Charge current into the battery. IQ0B reads 0 on battery power and no readable sensor
+    /// reports discharge current, so it is only meaningful while external power is connected.
+    var sensorBatteryCurrent: Double? {
+        guard externalConnected else { return nil }
+        return sensor(key: "IQ0B", name: "Charger IQ0B")
+    }
+    var sensorBatteryVoltage: Double? {
+        sensor(key: "VQ0l", name: "Charger VQ0l") ?? sensor(key: "VP0u", name: "PMU VP0u")
+    }
     var sensorBatteryWatts: Double? {
         guard let i = sensorBatteryCurrent, let v = sensorBatteryVoltage else { return nil }
         return i * v
     }
-    private var gasGaugeTemperatures: [Double] {
-        sensors.filter { $0.usage == 5 && $0.name == "gas gauge battery" }.map(\.value).sorted()
+
+    /// The four "gas gauge battery" temperatures (SMC keys TG0B, TG0C, TG0H, TG0V), coolest first.
+    private var gasGaugeReadings: [HIDSensors.Reading] {
+        let all = sensors.filter { $0.usage == 5 && $0.name == "gas gauge battery" }
+        // One reading per key; iOS 27 may publish a key twice.
+        var byKey: [String: HIDSensors.Reading] = [:]
+        var unkeyed: [HIDSensors.Reading] = []
+        for r in all { if r.key.isEmpty { unkeyed.append(r) } else if byKey[r.key] == nil { byKey[r.key] = r } }
+        return (Array(byKey.values) + unkeyed).sorted { $0.value < $1.value }
     }
 
-    /// The gas gauge publishes four temperature keys (TG0B, TG0C, TG0H, TG0V). Three agree and
-    /// track the cell; TG0B runs up to ~10 °C hotter under charge current, most likely the gauge
-    /// board near the connector. The median keeps the odd one out from posing as the cell.
+    /// Median of the gas-gauge temperatures. On both test phones three of the four agree within
+    /// 0.1 °C and the fourth (TG0B on the 18 Pro Max) reads 1 to 13 °C above them while charging.
+    /// Apple does not document what each key measures; the median follows the three that agree.
     var sensorBatteryTemperatureC: Double? {
-        let values = gasGaugeTemperatures
+        let values = gasGaugeReadings.map(\.value)
         guard !values.isEmpty else { return nil }
         let mid = values.count / 2
         return values.count.isMultiple(of: 2) ? (values[mid - 1] + values[mid]) / 2 : values[mid]
     }
 
-    /// The hottest gas-gauge key when it stands clear of the others.
-    var batteryHotspotC: Double? {
-        guard let median = sensorBatteryTemperatureC, let hottest = gasGaugeTemperatures.last,
-              hottest > median + 1.5 else { return nil }
-        return hottest
+    /// The hottest gas-gauge key and its value, when it reads more than 1.5 °C above the median.
+    var batteryHotspot: (key: String, celsius: Double)? {
+        guard let median = sensorBatteryTemperatureC, let hottest = gasGaugeReadings.last,
+              hottest.value > median + 1.5 else { return nil }
+        return (hottest.key.isEmpty ? "?" : hottest.key, hottest.value)
     }
-    var chargerJunctionTemperatureC: Double? { sensor("Charger TQ0j") }
-    var chargerDieTemperatureC: Double? { sensor("Charger TQ0d") }
-    /// Hottest SoC die sensor (`PMU tdie1…n`).
-    var socMaxTemperatureC: Double? {
+    /// Apple's sensor "Charger", SMC key TQ0j.
+    var chargerTemperatureC: Double? { sensor(key: "TQ0j", name: "Charger TQ0j") }
+    /// Hottest of the sensors Apple names "PMU tdie…" (SMC keys TP…b and TP…l). These belong to the
+    /// power-management unit; the phone exposes no sensor named for the CPU or SoC.
+    var pmuDieMaxTemperatureC: Double? {
         sensors.filter { $0.usage == 5 && $0.name.hasPrefix("PMU tdie") }.map(\.value).max()
     }
 
@@ -178,7 +210,8 @@ struct PowerSnapshot {
     var batteryCurrent: Double? { instantAmperage_mA.map { Double($0) / 1000 } ?? sensorBatteryCurrent }
     var batteryTemperatureC: Double? { temperatureC ?? sensorBatteryTemperatureC }
 
-    /// The headline number: charger input while plugged in, otherwise battery drain.
+    /// The headline number: charger input while plugged in. On battery only the macOS registry
+    /// reports drain; iOS has no discharge sensor, so the headline is empty there.
     var primaryWatts: (value: Double, label: String)? {
         if externalConnected, let w = chargerInputWatts {
             return (w, isWirelessInput ? "from charger (MagSafe)" : "from charger (USB-C)")
@@ -220,7 +253,8 @@ struct PowerSnapshot {
 
     /// The PD profile currently in use, or the adapter's reported voltage/current.
     var adapterNegotiated: (voltage_mV: Int, current_mA: Int)? {
-        if let active = adapterActiveProfile, let p = adapterProfiles.first(where: { $0.index == active }) {
+        if let active = adapterActiveProfile,
+           let p = adapterProfiles.first(where: { $0.index == active && $0.isReported }) {
             return (p.voltage_mV, p.current_mA)
         }
         if let v = adapterVoltage_mV, let c = adapterCurrent_mA { return (v, c) }
@@ -240,12 +274,21 @@ struct PowerSnapshot {
         return text
     }
 
+    struct AdapterProfile {
+        let index: Int
+        let voltage_mV: Int
+        let current_mA: Int
+        /// iOS fills entries it does not decode with 65535 mV / 65535 mA. A fixed USB PD profile
+        /// cannot encode either (limits are 51.15 V and 10.23 A), so these carry no values.
+        var isReported: Bool { voltage_mV != 0xFFFF && current_mA != 0xFFFF }
+    }
+
     /// USB PD / HVC power profiles the adapter advertised.
-    var adapterProfiles: [(index: Int, voltage_mV: Int, current_mA: Int)] {
+    var adapterProfiles: [AdapterProfile] {
         guard let menu = adapter?["UsbHvcMenu"] as? [[String: Any]] else { return [] }
         return menu.compactMap { entry in
             guard let v = signedInt("MaxVoltage", in: entry), let c = signedInt("MaxCurrent", in: entry) else { return nil }
-            return (signedInt("Index", in: entry) ?? 0, v, c)
+            return AdapterProfile(index: signedInt("Index", in: entry) ?? 0, voltage_mV: v, current_mA: c)
         }
     }
 

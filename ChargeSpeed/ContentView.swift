@@ -66,8 +66,11 @@ struct ContentView: View {
                 Text(snap.statusText)
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(statusColor(snap))
-                if monitor.isThrottling {
-                    Label("Throttling · thermal state \(thermalName(monitor.thermalState))", systemImage: "thermometer.high")
+                if monitor.isThermalStateHigh {
+                    Label(monitor.thermalState == .critical
+                          ? "Thermal state critical · performance reduced"
+                          : "Thermal state serious · performance may be reduced",
+                          systemImage: "thermometer.high")
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.red)
                 } else if let t = snap.batteryTemperatureC, t >= Self.batteryHotC {
@@ -75,9 +78,10 @@ struct ContentView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.red)
                 }
-                if monitor.unmeteredPathEngaged, let w = snap.chargerInputWatts {
-                    Label(String(format: "Second charge path unmetered · true input ≈ %.0f W", w * 2), systemImage: "exclamationmark.triangle")
-                        .font(.footnote.weight(.semibold))
+                if snap.mayReadHalf {
+                    Label("Above ~30 W, 18 Pro Max units have read about half of a USB-C meter. See README.",
+                          systemImage: "exclamationmark.triangle")
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(.orange)
                         .multilineTextAlignment(.center)
                 }
@@ -94,7 +98,8 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 } else {
                     bigNumber("—")
-                    Text(snap.isCharging ? "measuring… needs two 1% steps" : "no power sensors readable on this device")
+                    Text(!snap.externalConnected ? "on battery · no readable discharge sensor"
+                         : snap.isCharging ? "measuring… needs two % steps" : "no power sensors readable")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
                 }
@@ -238,7 +243,9 @@ struct ContentView: View {
         if snap.batteryWatts != nil || snap.batteryVoltage != nil || snap.cycleCount != nil {
             Section("Charging") {
                 row("Into battery", snap.batteryWatts.map { watts($0, signed: true) })
-                row("Battery", zip(snap.batteryVoltage, snap.batteryCurrent).map { String(format: "%.3f V · %.3f A", $0, $1) })
+                row("Battery", snap.batteryVoltage.map { v in
+                    snap.batteryCurrent.map { String(format: "%.3f V · %.3f A", v, $0) } ?? String(format: "%.3f V", v)
+                })
                 row("Power (average)", snap.averageBatteryWatts.map { watts($0, signed: true) })
                 row("Charge", zip(snap.rawCurrentCapacity_mAh, snap.rawMaxCapacity_mAh).map { "\($0) / \($1) mAh" })
                 row("Design capacity", snap.designCapacity_mAh.map { "\($0) mAh" })
@@ -250,24 +257,27 @@ struct ContentView: View {
 
     // MARK: Thermals
 
-    /// Li-ion ages fastest charging hot; iOS slows charging around 40 °C and pauses near 45 °C.
+    /// The app's own thresholds. Apple publishes no battery temperature limits; it says only that
+    /// iPhone may slow or pause charging when it gets too warm.
     private static let batteryWarmC = 38.0
     private static let batteryHotC = 42.0
 
     @ViewBuilder
     private func thermalSection(_ snap: PowerSnapshot) -> some View {
-        let throttling = monitor.isThrottling
-        if snap.batteryTemperatureC != nil || snap.chargerJunctionTemperatureC != nil || snap.socMaxTemperatureC != nil {
+        let high = monitor.isThermalStateHigh
+        if snap.batteryTemperatureC != nil || snap.chargerTemperatureC != nil || snap.pmuDieMaxTemperatureC != nil {
             Section("Thermals") {
-                row("Thermal state", thermalName(monitor.thermalState).capitalized + (throttling ? " · throttling" : ""),
-                    color: throttling ? .red : (monitor.thermalState == .fair ? .orange : nil))
-                row("Battery", snap.batteryTemperatureC.map { Formatting.temperature($0) },
+                row("Thermal state", thermalName(monitor.thermalState).capitalized,
+                    color: high ? .red : (monitor.thermalState == .fair ? .orange : nil))
+                row("Battery (median)", snap.batteryTemperatureC.map { Formatting.temperature($0) },
                     color: snap.batteryTemperatureC.map { $0 >= Self.batteryHotC ? .red : ($0 >= Self.batteryWarmC ? .orange : nil) } ?? nil)
-                row("Battery gauge board", snap.batteryHotspotC.map { Formatting.temperature($0) })
-                row("Charger junction", snap.chargerJunctionTemperatureC.map { Formatting.temperature($0) },
-                    color: throttling ? .red : nil)
-                row("SoC (hottest die)", snap.socMaxTemperatureC.map { Formatting.temperature($0) },
-                    color: throttling ? .red : nil)
+                if let hot = snap.batteryHotspot {
+                    row("Battery sensor \(hot.key)", Formatting.temperature(hot.celsius))
+                }
+                row("Charger (TQ0j)", snap.chargerTemperatureC.map { Formatting.temperature($0) },
+                    color: high ? .red : nil)
+                row("PMU die, hottest", snap.pmuDieMaxTemperatureC.map { Formatting.temperature($0) },
+                    color: high ? .red : nil)
             }
         }
     }
@@ -301,10 +311,12 @@ struct ContentView: View {
                     DisclosureGroup("All profiles (\(profiles.count))", isExpanded: $showProfiles) {
                         ForEach(profiles, id: \.index) { p in
                             row((p.index == snap.adapterActiveProfile ? "▶ " : "") + "Profile \(p.index)",
-                                String(format: "%.1f V × %.2f A = %.0f W",
-                                       Double(p.voltage_mV) / 1000,
-                                       Double(p.current_mA) / 1000,
-                                       Double(p.voltage_mV) * Double(p.current_mA) / 1_000_000))
+                                p.isReported
+                                ? String(format: "%.1f V × %.2f A = %.0f W",
+                                         Double(p.voltage_mV) / 1000,
+                                         Double(p.current_mA) / 1000,
+                                         Double(p.voltage_mV) * Double(p.current_mA) / 1_000_000)
+                                : "values not reported by iOS")
                         }
                     }
                 }
