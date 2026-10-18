@@ -21,13 +21,18 @@ around with the live watts on screen until the number peaks.
 - Watts into the battery, battery voltage and current.
 - Peak watts for the current charge, kept on screen after unplugging, reset at the next plug-in.
 - Adapter name, negotiated USB-PD profile, full profile list.
-- Temperatures: battery, charger junction, hottest SoC die. iOS thermal state, with a red
-  "Throttling" line when it reaches serious or critical; battery turns amber at 38 °C, red at 42 °C.
+- Temperatures: battery, charger junction, hottest SoC die, and iOS's thermal state with a red
+  "Throttling" line at serious or critical. The battery gauge publishes four temperature keys
+  (TG0B, TG0C, TG0H, TG0V); three agree and track the cell, while TG0B sits near the connector and
+  runs up to 10 °C hotter under charge current. Earlier builds showed the hottest of the four as
+  the battery, which flagged a cool phone as hot on the iPhone 18 Pro's higher current. The battery
+  row is now the median of the four, and TG0B is shown separately as "Battery gauge board".
+  Battery turns amber at 38 °C, red at 42 °C.
 - Percent, charging state, low power mode.
 - A charging hold below 100 % (Optimized Battery Charging or charge limit), inferred from behaviour.
 - Raw sensor and dictionary dumps, collapsed.
 
-## Not available on iPhone
+## What iOS hides from apps
 
 Tried and blocked by the sandbox on iOS 26 and 27; the simulator shows them because it reads the Mac:
 
@@ -35,12 +40,36 @@ Tried and blocked by the sandbox on iOS 26 and 27; the simulator shows them beca
 - Optimized Battery Charging, charge limit, and Clean Energy Charging settings (PowerUI XPC denied).
 - powerd's "Charging On Hold" status and time-to-empty (privileged, or always 0).
 - Discharge current on battery: no sensor exists, so no time-to-empty from power.
-- iPhone 18 Pro / Pro Max above about 30 W wired: the phone adds a second charge path with no
-  sensor, and input and battery readings show half the true value (43.8 W on a display charger,
-  21.9 W read). The app flags it when the metered path sits at half the PD contract and prints the
-  doubled estimate; it never alters the headline number.
 
 Details in [CLAUDE.md](CLAUDE.md).
+
+## iPhone 18 Pro reads half above ~30 W
+
+The 18 Pro charges through two circuits once it draws more than about 30 W wired. Only the first
+has sensors. The second carries current the app cannot see, so the input and battery readings show
+roughly half the true value.
+
+Measured on an iPhone 18 Pro Max, iOS 27, plugged into a 45 W adapter with a built-in wattage
+display, battery at 55 %, app and display read side by side over four minutes:
+
+| Display charger | App | Ratio |
+|---|---|---|
+| 33.8 W | 18.4 W | 0.54 |
+| 43.8 W | 22.0 W | 0.50 |
+| 43.8 W | 21.8 W | 0.50 |
+| 42.3 W | 21.4 W | 0.51 |
+| 38.2 W | 18.4 W | 0.48 |
+
+During the split the metered input current sat at 1.50 A of a 3.00 A contract, and the battery
+current halved the same way. None of the other 120-odd sensors moved.
+
+When the metered circuit sits at half the negotiated PD current for ten seconds, the app shows an
+orange line with the reading doubled. That is an assumption, not a measurement: it holds only if
+the two circuits share equally, which they did throughout the test above. The headline number is
+never altered. The line clears on unplug or if the metered current ever exceeds what an equal
+split allows.
+
+Not seen on the 17 Pro Max. Expect it on any future iPhone rated 50 W or more.
 
 ## Versus App Store "charging speed" apps
 

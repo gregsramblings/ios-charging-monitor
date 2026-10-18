@@ -17,7 +17,7 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: com.gregwilson.chargespeed
-        MARKETING_VERSION: "0.1.0"
+        MARKETING_VERSION: "0.2.0"
         CURRENT_PROJECT_VERSION: 1
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: MD8FHBP25M
