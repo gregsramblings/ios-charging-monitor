@@ -29,6 +29,11 @@ final class PowerMonitor: ObservableObject {
     @Published private(set) var thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
     var isThrottling: Bool { thermalState == .serious || thermalState == .critical }
 
+    /// iPhone 18 Pro only: set while the second wired charge path is engaged. That path has no
+    /// sensors, so input and battery readings are about half the true value.
+    @Published private(set) var unmeteredPathEngaged = false
+    private var halfContractSince: Date?
+
     /// Highest charger input power seen since the last reset, persisted across launches.
     @Published private(set) var peak: PeakRecord?
     /// Identity of the current charging session, persisted so a relaunch mid-session keeps the peak.
@@ -161,6 +166,7 @@ final class PowerMonitor: ObservableObject {
         updateHold(snap)
         updateSession(snap)
         updatePeak(snap)
+        updateUnmeteredPath(snap)
         let state = ProcessInfo.processInfo.thermalState
         if state != thermalState { thermalState = state }
         let notifyState = SmartChargeNotificationState()
@@ -259,6 +265,33 @@ final class PowerMonitor: ObservableObject {
                 persistHold()
                 currentHold = nil
             }
+        }
+    }
+
+    /// Latches when the metered path sits at half the negotiated PD current for 10 s: a single
+    /// path draws what it needs up to the contract, while the split pins each path at exactly half.
+    /// Unlatches on unplug or whenever the metered path exceeds 58 % of the contract, which the
+    /// split can never do. Verified against a display charger on an iPhone 18 Pro Max: 43.8 W
+    /// true, 21.9 W read, sensor pinned at 1.50 A of a 3.00 A contract.
+    private func updateUnmeteredPath(_ snap: PowerSnapshot) {
+        guard PowerSnapshot.hasUnmeteredChargePath, snap.externalConnected, !snap.isWirelessInput,
+              let current = snap.usbInputCurrent, let contract = snap.contractCurrentA, contract > 0 else {
+            unmeteredPathEngaged = false
+            halfContractSince = nil
+            return
+        }
+        if current > contract * 0.58 {
+            unmeteredPathEngaged = false
+            halfContractSince = nil
+            return
+        }
+        if abs(current - contract / 2) <= contract * 0.05 {
+            if halfContractSince == nil { halfContractSince = snap.date }
+            if !unmeteredPathEngaged, let since = halfContractSince, snap.date.timeIntervalSince(since) >= 10 {
+                unmeteredPathEngaged = true
+            }
+        } else {
+            halfContractSince = nil
         }
     }
 

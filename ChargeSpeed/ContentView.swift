@@ -75,6 +75,12 @@ struct ContentView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.red)
                 }
+                if monitor.unmeteredPathEngaged, let w = snap.chargerInputWatts {
+                    Label(String(format: "Second charge path unmetered · true input ≈ %.0f W", w * 2), systemImage: "exclamationmark.triangle")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .multilineTextAlignment(.center)
+                }
 
                 if let primary = snap.primaryWatts {
                     bigNumber(watts(primary.value, signed: true))

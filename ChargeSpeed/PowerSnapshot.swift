@@ -42,6 +42,19 @@ struct PowerSnapshot {
     }
     var holdIsInferred: Bool { chargeStatusText == nil && isChargingOnHold }
 
+    /// iPhone 18 Pro / Pro Max (iPhone19,x) charge through two wired paths above ~30 W; only the
+    /// first has sensors.
+    static let hasUnmeteredChargePath: Bool = {
+        var size = 0
+        sysctlbyname("hw.machine", nil, &size, nil, 0)
+        var buffer = [CChar](repeating: 0, count: max(size, 1))
+        sysctlbyname("hw.machine", &buffer, &size, nil, 0)
+        return String(cString: buffer).hasPrefix("iPhone19,")
+    }()
+
+    /// Negotiated PD contract current in amps.
+    var contractCurrentA: Double? { adapterNegotiated.map { Double($0.current_mA) / 1000 } }
+
     // MARK: Charge state
 
     var isCharging: Bool {

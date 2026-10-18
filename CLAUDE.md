@@ -22,9 +22,11 @@ Personal dev-only iPhone app: live charge power in watts from private APIs. Not 
 - `PowerMonitor.swift`: 1 s poll, %-rate fallback (`batteryWattHours` = 19.7 for 17 Pro Max), hold detection with 45 s debounce, peak of the headline watts per charging session (median of last 3 samples; resets at plug-in, survives full/top-off and relaunch via persisted session identity: adapter serial + last-seen plugged/percent; manual reset button).
 - `SmartCharge.m`: PowerUI client, blocked on iOS, kept for macOS/entitled builds. `Probes*.swift/.m`: DEBUG exploration only, not called.
 
-## Open: iPhone 18 Pro Max high-power reading
+## iPhone 18 Pro second charge path (verified 2026-10-18)
 
-Above roughly 30 W (fixed 15 V PDO, below ~70 % charge) the 18 Pro Max reads about half the true input: USB meter 14.55 V × 2.99 A while `IQ0u` = 1.51 A, and `IQ0B` halves too (MiniWatts issues #10/#16). A second charge path with no exposed sensor; not reproduced on Greg's unit at 41 W / 15 V. Needs a capture from plug-in below 60 % with a meter.
+Above ~30 W wired the 18 Pro Max splits charging across two paths; only path 0 has SMC keys. Display charger vs app over 4 min at 15 V × 3 A: 33.8/18.4, 43.8/22.0, 43.8/21.8, 42.3/21.4, 38.2/18.4 W (ratio 0.48–0.54). Onset: input ramps to ~23 W and pauses with `IQ0u` ≈ 1.5 A for ~7 s, jumps to 30 W for 2 s, dips to 8 W for one tick, then sits at exactly half the contract (1.50 A of 3.00 A); `IQ0B` halves too. No other sensor of the 123 moves; `WQ0u`/`QQ0u` integrate the metered path only. Detector in PowerMonitor: iPhone19,x + metered current within 5 % of contract/2 for 10 s → `unmeteredPathEngaged`; cleared on unplug or current > 0.58 × contract. Known gap: a return to single path at high charge while drawing little leaves the flag set until unplug (one report says readings are correct again above 70 %).
+
+powerd `Current Capacity` steps in 5 % increments on iOS (55 → 60 → 65), so the %-rate estimator and hold threshold work on 5 % data.
 
 ## Verified blocked on iOS 26 and 27 (don't retry)
 

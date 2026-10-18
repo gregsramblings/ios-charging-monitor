@@ -35,6 +35,10 @@ Tried and blocked by the sandbox on iOS 26 and 27; the simulator shows them beca
 - Optimized Battery Charging, charge limit, and Clean Energy Charging settings (PowerUI XPC denied).
 - powerd's "Charging On Hold" status and time-to-empty (privileged, or always 0).
 - Discharge current on battery: no sensor exists, so no time-to-empty from power.
+- iPhone 18 Pro / Pro Max above about 30 W wired: the phone adds a second charge path with no
+  sensor, and input and battery readings show half the true value (43.8 W on a display charger,
+  21.9 W read). The app flags it when the metered path sits at half the PD contract and prints the
+  doubled estimate; it never alters the headline number.
 
 Details in [CLAUDE.md](CLAUDE.md).
 
