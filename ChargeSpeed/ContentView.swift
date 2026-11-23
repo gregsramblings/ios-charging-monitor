@@ -35,6 +35,13 @@ struct ContentView: View {
             .navigationTitle("ChargeSpeed")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    NavigationLink {
+                        HistoryView(store: monitor.log)
+                    } label: {
+                        Label("History", systemImage: "clock.arrow.circlepath")
+                    }
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         UIPasteboard.general.string = monitor.rawDump()
