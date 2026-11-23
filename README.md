@@ -33,6 +33,17 @@ around with the live watts on screen until the number peaks.
 - Percent, charging state, low power mode.
 - A charging hold below 100 % (Optimized Battery Charging or charge limit), inferred from behaviour.
 - Raw sensor and dictionary dumps, collapsed.
+- History: every charge is kept, plug-in to unplug, as 10 s averages of watts, watts into the
+  battery, percent and battery temperature. Each charge has a chart and a summary (peak, average,
+  energy into the battery, %/h, max temperature) and a note. Recording only happens while the app
+  is open; time it was closed shows as a gap and is left out of the energy total.
+- Chargers are recognised by the adapter's serial number, or by its reported name and model when
+  there is no serial. Wireless chargers can't be told apart this way: on an iPhone Duo, a wireless
+  charger reported only "mpp chg" with adapter ID 0. Each charge has a "Charger used" picker to
+  file it under a named charger.
+- Compare two charges, or two chargers across all their charges. Watts are plotted against battery
+  percent, and the verdict uses the percent range both cover, since charging slows as the battery
+  fills.
 
 ## What iOS hides from apps
 

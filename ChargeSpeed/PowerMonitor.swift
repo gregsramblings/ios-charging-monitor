@@ -82,6 +82,9 @@ final class PowerMonitor: ObservableObject {
         }
     }()
 
+    /// Every charge, plug-in to unplug, for the History screen.
+    let log = ChargeHistoryStore()
+
     private let reader = IOKitBattery()
     private let sensors = HIDSensors()
     private let smartChargeReader = SmartChargeReader()
@@ -132,6 +135,7 @@ final class PowerMonitor: ObservableObject {
     func stop() {
         task?.cancel()
         task = nil
+        log.flush()
     }
 
     func refresh() {
@@ -160,6 +164,7 @@ final class PowerMonitor: ObservableObject {
         updateEstimate(snap)
         updateHold(snap)
         updateSession(snap)
+        if snap.externalConnected { log.record(snap, adapterIdentity: adapterIdentity(snap)) }
         updatePeak(snap)
         let state = ProcessInfo.processInfo.thermalState
         if state != thermalState { thermalState = state }
@@ -299,6 +304,7 @@ final class PowerMonitor: ObservableObject {
                 session = ChargingSession(start: snap.date, adapterIdentity: adapterIdentity(snap),
                                           lastSeenPluggedIn: true, lastSeenPercent: snap.percent)
                 persistSession()
+                log.begin(at: snap.date, snap: snap, adapterIdentity: adapterIdentity(snap))
             } else if var current = session {
                 if current.adapterIdentity == nil { current.adapterIdentity = adapterIdentity(snap) }
                 if !current.lastSeenPluggedIn || current.lastSeenPercent != snap.percent {
@@ -319,6 +325,15 @@ final class PowerMonitor: ObservableObject {
             current.lastSeenPercent = snap.percent
             session = current
             persistSession()
+        }
+
+        // History: a continued session from before this feature existed has no open record.
+        // An unplug seen live ends the record now; one that happened while the app was closed
+        // ends it at its last sample.
+        if pluggedIn, log.openRecord == nil {
+            log.begin(at: snap.date, snap: snap, adapterIdentity: adapterIdentity(snap))
+        } else if !pluggedIn, log.openRecord != nil {
+            log.end(at: lastPluggedIn == true ? snap.date : nil)
         }
     }
 
